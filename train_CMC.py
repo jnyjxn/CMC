@@ -9,11 +9,10 @@ import time
 import torch
 import torch.backends.cudnn as cudnn
 import argparse
-import socket
 
 import tensorboard_logger as tb_logger
 
-from torchvision import transforms, datasets
+from torchvision import transforms
 from dataset import RGB2Lab, RGB2YCbCr
 from util import adjust_learning_rate, AverageMeter
 
@@ -26,7 +25,7 @@ from NCE.NCECriterion import NCESoftmaxLoss
 from dataset import ImageFolderInstance
 
 try:
-    from apex import amp, optimizers
+    from apex import amp
 except ImportError:
     pass
 """
