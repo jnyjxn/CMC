@@ -11,7 +11,7 @@ image is passed through their
 
 class MyMultiviewAlexNetCMC(nn.Module):
     def __init__(self, feat_dim=128):
-        super(MyAlexNetCMC, self).__init__()
+        super(MyMultiviewAlexNetCMC, self).__init__()
         self.encoder = alexnet(feat_dim=feat_dim)
         self.encoder = nn.DataParallel(self.encoder)
 
@@ -23,10 +23,22 @@ class alexnet(nn.Module):
     def __init__(self, feat_dim=128):
         super(alexnet, self).__init__()
 
-        self.half_encoder = alexnet_half(in_channel=1, feat_dim=feat_dim)
+        # self.half_encoder = alexnet_half(in_channel=1, feat_dim=feat_dim)
+
+        self.v1_to_v2 = alexnet_half(in_channel=1, feat_dim=feat_dim)
+        self.v2_to_v1 = alexnet_half(in_channel=1, feat_dim=feat_dim)
 
     def forward(self, x, layer=8):
-        return tuple(self.half_encoder(slice, layer) for slice in torch.split(x, split_size_or_sections=1, dim=1))
+        # return tuple(self.half_encoder(slice, layer) for slice in torch.split(x, split_size_or_sections=1, dim=1))
+
+        # TODO: Change this code to allow for any number of input images
+
+        n_channels_in_input = 4
+
+        v1, v2, _ = torch.split(x, [1, 1, n_channels_in_input-2], dim=1)
+        feat_v1 = self.v1_to_v2(v1, layer)
+        feat_v2 = self.v2_to_v1(v2, layer)
+        return feat_v1, feat_v2
 
 class alexnet_half(nn.Module):
     def __init__(self, in_channel=1, feat_dim=128):

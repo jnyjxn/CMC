@@ -7,6 +7,39 @@ import torch
 import torchvision.datasets as datasets
 
 
+
+class MultiviewImageFolderInstance(datasets.DatasetFolder):
+    """Folder datasets which returns the index of the image as well
+    """
+
+    def __init__(self, root, transform=None, target_transform=None, two_crop=False):
+        super(MultiviewImageFolderInstance, self).__init__(loader=self.load_npy, root=root, transform=transform, target_transform=target_transform, extensions=("npy",))
+        self.two_crop = two_crop
+
+    def __getitem__(self, index):
+        """
+        Args:
+            index (int): Index
+        Returns:
+            tuple: (image, target, index) where target is class_index of the target class.
+        """
+        path, target = self.samples[index]
+        multiview_imgs = self.loader(path)
+        if self.transform is not None:
+            multiview_imgs = self.transform(multiview_imgs)
+        if self.target_transform is not None:
+            target = self.target_transform(target)
+
+        if self.two_crop:
+            img2 = self.transform(multiview_imgs)
+            multiview_imgs = torch.cat([multiview_imgs, img2], dim=0)
+
+        return multiview_imgs, target, index
+
+    @staticmethod
+    def load_npy(path):
+        return np.load(path)
+
 class ImageFolderInstance(datasets.ImageFolder):
     """Folder datasets which returns the index of the image as well
     """

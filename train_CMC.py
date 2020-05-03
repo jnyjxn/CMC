@@ -20,10 +20,11 @@ from models.alexnet import MyAlexNetCMC
 from models.alexnet_multiview import MyMultiviewAlexNetCMC
 from models.resnet import MyResNetsCMC
 from NCE.NCEAverage import NCEAverage
+from NCE.NCEAverageMultiview import NCEAverageMultiview
 from NCE.NCECriterion import NCECriterion
 from NCE.NCECriterion import NCESoftmaxLoss
 
-from dataset import ImageFolderInstance
+from dataset import ImageFolderInstance, MultiviewImageFolderInstance
 
 try:
 	from apex import amp
@@ -142,13 +143,14 @@ def get_train_loader(args):
 	#     raise NotImplemented('view not implemented {}'.format(args.view))
 	# normalize = transforms.Normalize(mean=mean, std=std)
 
-	train_transform = transforms.Compose([
-		# transforms.RandomResizedCrop(224, scale=(args.crop_low, 1.)),
-		transforms.RandomHorizontalFlip(),
-		# color_transfer,
-		transforms.ToTensor(),
-		# normalize,
-	])
+	# train_transform = transforms.Compose([
+	# 	# transforms.RandomResizedCrop(224, scale=(args.crop_low, 1.)),
+	# 	transforms.Grayscale(),
+	# 	transforms.RandomHorizontalFlip(),
+	# 	# color_transfer,
+	# 	transforms.ToTensor(),
+	# 	# normalize,
+	# ])
 	# ImageFolderInstance uses torchvision's ImageFolder. It allows index-based
 	# retrieval of every sample in the dataset. ImageFolder normally returns a
 	# (PIL image object, class index) as a tuple. ImageFolderInstance additionally
@@ -157,7 +159,8 @@ def get_train_loader(args):
 
 	# One main requirement of the transform is that it should return a tensor or
 	# an NP array, not a PIL image
-	train_dataset = ImageFolderInstance(data_folder, transform=train_transform)
+	# train_dataset = ImageFolderInstance(data_folder, transform=train_transform)
+	train_dataset = MultiviewImageFolderInstance(data_folder)
 	train_sampler = None
 
 	# train loader
@@ -174,25 +177,30 @@ def get_train_loader(args):
 
 def set_model(args, n_data):
 	# set the model
-	if args.model == 'alexnet':
-		model = MyAlexNetCMC(args.feat_dim)
-	elif args.model.startswith('resnet'):
-		model = MyResNetsCMC(args.model)
+	# if args.model == 'alexnet':
+	# 	model = MyAlexNetCMC(args.feat_dim)
+	# elif args.model.startswith('resnet'):
+	# 	model = MyResNetsCMC(args.model)
+	n_views_per_sample = 2
+
+	if True or args.model == 'alexnet_multiview':
+		model = MyMultiviewAlexNetCMC(args.feat_dim)
 	else:
 		raise ValueError('model not supported yet {}'.format(args.model))
 
-	contrast = NCEAverage(args.feat_dim, n_data, args.nce_k, args.nce_t, args.nce_m, args.softmax)
-	criterion_l = NCESoftmaxLoss() if args.softmax else NCECriterion(n_data)
-	criterion_ab = NCESoftmaxLoss() if args.softmax else NCECriterion(n_data)
+	# contrast = NCEAverage(args.feat_dim, n_data, args.nce_k, args.nce_t, args.nce_m, args.softmax)
+	contrast = NCEAverageMultiview(args.feat_dim, n_data, n_views_per_sample, args.nce_k, args.nce_t, args.nce_m, args.softmax)
+	criterion_v1 = NCESoftmaxLoss() if args.softmax else NCECriterion(n_data)
+	criterion_v2 = NCESoftmaxLoss() if args.softmax else NCECriterion(n_data)
 
 	if torch.cuda.is_available():
 		model = model.cuda()
 		contrast = contrast.cuda()
-		criterion_ab = criterion_ab.cuda()
-		criterion_l = criterion_l.cuda()
+		criterion_v2 = criterion_v2.cuda()
+		criterion_v1 = criterion_v1.cuda()
 		cudnn.benchmark = True
 
-	return model, contrast, criterion_ab, criterion_l
+	return model, contrast, criterion_v2, criterion_v1
 
 
 def set_optimizer(args, model):
@@ -214,10 +222,10 @@ def train(epoch, train_loader, model, contrast, criterion_l, criterion_ab, optim
 	batch_time = AverageMeter()
 	data_time = AverageMeter()
 	losses = AverageMeter()
-	l_loss_meter = AverageMeter()
-	ab_loss_meter = AverageMeter()
-	l_prob_meter = AverageMeter()
-	ab_prob_meter = AverageMeter()
+	v1_loss_meter = AverageMeter()
+	v2_loss_meter = AverageMeter()
+	v1_prob_meter = AverageMeter()
+	v2_prob_meter = AverageMeter()
 
 	end = time.time()
 	for idx, (inputs, _, index) in enumerate(train_loader):
@@ -230,15 +238,15 @@ def train(epoch, train_loader, model, contrast, criterion_l, criterion_ab, optim
 			inputs = inputs.cuda()
 
 		# ===================forward=====================
-		feat_l, feat_ab = model(inputs)
-		out_l, out_ab = contrast(feat_l, feat_ab, index) # NCEAverage
+		feat_v1, feat_v2 = model(inputs)
+		out_v1, out_v2 = contrast(feat_v1, feat_v2, index) # NCEAverage
 
-		l_loss = criterion_l(out_l)
-		ab_loss = criterion_ab(out_ab)
-		l_prob = out_l[:, 0].mean()
-		ab_prob = out_ab[:, 0].mean()
+		v1_loss = criterion_l(out_v1)
+		v2_loss = criterion_ab(out_v2)
+		v1_prob = out_v1[:, 0].mean()
+		v2_prob = out_v2[:, 0].mean()
 
-		loss = l_loss + ab_loss
+		loss = v1_loss + v2_loss
 
 		# ===================backward=====================
 		optimizer.zero_grad()
@@ -251,10 +259,10 @@ def train(epoch, train_loader, model, contrast, criterion_l, criterion_ab, optim
 
 		# ===================meters=====================
 		losses.update(loss.item(), bsz)
-		l_loss_meter.update(l_loss.item(), bsz)
-		l_prob_meter.update(l_prob.item(), bsz)
-		ab_loss_meter.update(ab_loss.item(), bsz)
-		ab_prob_meter.update(ab_prob.item(), bsz)
+		v1_loss_meter.update(v1_loss.item(), bsz)
+		v1_prob_meter.update(v1_prob.item(), bsz)
+		v2_loss_meter.update(v2_loss.item(), bsz)
+		v2_prob_meter.update(v2_prob.item(), bsz)
 
 		torch.cuda.synchronize()
 		batch_time.update(time.time() - end)
@@ -266,15 +274,15 @@ def train(epoch, train_loader, model, contrast, criterion_l, criterion_ab, optim
 				  'BT {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
 				  'DT {data_time.val:.3f} ({data_time.avg:.3f})\t'
 				  'loss {loss.val:.3f} ({loss.avg:.3f})\t'
-				  'l_p {lprobs.val:.3f} ({lprobs.avg:.3f})\t'
-				  'ab_p {abprobs.val:.3f} ({abprobs.avg:.3f})'.format(
+				  'v1_p {v1probs.val:.3f} ({v1probs.avg:.3f})\t'
+				  'v2_p {v2probs.val:.3f} ({v2probs.avg:.3f})'.format(
 				   epoch, idx + 1, len(train_loader), batch_time=batch_time,
-				   data_time=data_time, loss=losses, lprobs=l_prob_meter,
-				   abprobs=ab_prob_meter))
-			print(out_l.shape)
+				   data_time=data_time, loss=losses, v1probs=v1_prob_meter,
+				   v2probs=v2_prob_meter))
+			print(out_v1.shape)
 			sys.stdout.flush()
 
-	return l_loss_meter.avg, l_prob_meter.avg, ab_loss_meter.avg, ab_prob_meter.avg
+	return v1_loss_meter.avg, v1_prob_meter.avg, v2_loss_meter.avg, v2_prob_meter.avg
 
 
 def main():
@@ -286,8 +294,11 @@ def main():
 	train_loader, n_data = get_train_loader(args)
 
 	# set the model
-	model, contrast, criterion_ab, criterion_l = set_model(args, n_data)
-	return
+	model, contrast, criterion_v2, criterion_v1 = set_model(args, n_data)
+
+	# for idx, (inputs, a, index) in enumerate(train_loader):
+	# 	input((inputs.shape, a, idx, index.shape))
+	# return
 
 	# set the optimizer
 	optimizer = set_optimizer(args, model)
@@ -326,16 +337,16 @@ def main():
 		print("==> training...")
 
 		time1 = time.time()
-		l_loss, l_prob, ab_loss, ab_prob = train(epoch, train_loader, model, contrast, criterion_l, criterion_ab,
+		v1_loss, v1_prob, v2_loss, v2_prob = train(epoch, train_loader, model, contrast, criterion_v1, criterion_v2,
 												 optimizer, args)
 		time2 = time.time()
 		print('epoch {}, total time {:.2f}'.format(epoch, time2 - time1))
 
 		# tensorboard logger
-		logger.log_value('l_loss', l_loss, epoch)
-		logger.log_value('l_prob', l_prob, epoch)
-		logger.log_value('ab_loss', ab_loss, epoch)
-		logger.log_value('ab_prob', ab_prob, epoch)
+		logger.log_value('v1_loss', v1_loss, epoch)
+		logger.log_value('v1_prob', v1_prob, epoch)
+		logger.log_value('v2_loss', v2_loss, epoch)
+		logger.log_value('v2_prob', v2_prob, epoch)
 
 		# save model
 		if epoch % args.save_freq == 0:
