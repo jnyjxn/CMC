@@ -7,6 +7,12 @@ import math
 class NCEAverage(nn.Module):
 
     def __init__(self, inputSize, outputSize, K, T=0.07, momentum=0.5, use_softmax=False):
+        ## inputSize is set via commandline argument feat_dim (default int: 128)
+        ## outputSize is set by the number of samples in the training set n_data (int)
+        ## K is set via commandline argument nce_k (default int: 16384)
+        ## T is set via commandline argument nce_t (default float: 0.07)
+        ## momentum is set via commandline argument nce_m (default float: 0.5)
+
         super(NCEAverage, self).__init__()
         self.nLem = outputSize
         self.unigrams = torch.ones(self.nLem)

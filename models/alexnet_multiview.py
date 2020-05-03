@@ -3,8 +3,13 @@ from __future__ import print_function
 import torch
 import torch.nn as nn
 
+"""
+In this file, it is assumed that each X tensor (input) is a stack of 1-channel
+images (greyscale). The stack is decomposed into its respective images and each
+image is passed through their
+"""
 
-class MyAlexNetCMC(nn.Module):
+class MyMultiviewAlexNetCMC(nn.Module):
     def __init__(self, feat_dim=128):
         super(MyAlexNetCMC, self).__init__()
         self.encoder = alexnet(feat_dim=feat_dim)
@@ -18,15 +23,10 @@ class alexnet(nn.Module):
     def __init__(self, feat_dim=128):
         super(alexnet, self).__init__()
 
-        self.l_to_ab = alexnet_half(in_channel=1, feat_dim=feat_dim)
-        self.ab_to_l = alexnet_half(in_channel=2, feat_dim=feat_dim)
+        self.half_encoder = alexnet_half(in_channel=1, feat_dim=feat_dim)
 
     def forward(self, x, layer=8):
-        l, ab = torch.split(x, [1, 2], dim=1)
-        feat_l = self.l_to_ab(l, layer)
-        feat_ab = self.ab_to_l(ab, layer)
-        return feat_l, feat_ab
-
+        return tuple(self.half_encoder(slice, layer) for slice in torch.split(x, split_size_or_sections=1, dim=1))
 
 class alexnet_half(nn.Module):
     def __init__(self, in_channel=1, feat_dim=128):
@@ -119,10 +119,10 @@ class Normalize(nn.Module):
 if __name__ == '__main__':
 
     import torch
-    model = alexnet().cuda()
-    data = torch.rand(10, 3, 224, 224).cuda()
-    out = model.compute_feat(data, 5)
+    model = alexnet()
+    data = torch.rand(10, 6, 224, 224)
+    out = model(data, 5)
 
     for i in range(10):
-        out = model.compute_feat(data, i)
-        print(i, out.shape)
+        out = model(data, i)
+        print(i, len(out))
